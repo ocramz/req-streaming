@@ -50,7 +50,8 @@ responseBracket request mgr =
   bracketR
     (L.responseOpen request mgr)
     L.responseClose
-    -- responseBodySource
+    -- (lift . responseBodySource)
+      
 
 
 responseBodySource :: MonadIO m

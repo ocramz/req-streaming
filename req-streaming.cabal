@@ -28,6 +28,7 @@ library
                      , resourcet
                      , streaming
                      , streaming-bytestring
+                     , transformers
                      , unliftio-core
 
 -- executable req-streaming
