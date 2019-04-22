@@ -32,9 +32,9 @@ import Control.Monad.Trans.Class (lift)
 -- unliftio-core
 import Control.Monad.IO.Unlift (MonadUnliftIO(..))
 -- resourcet
-import Control.Monad.Trans.Resource (runResourceT, ResourceT, MonadResource, allocate, release)
+import Control.Monad.Trans.Resource (runResourceT, allocate, release)
 -- req
-import Network.HTTP.Req (req')
+-- import Network.HTTP.Req (req')
 -- http-client
 import qualified Network.HTTP.Client as L
 -- bytestring
@@ -45,7 +45,10 @@ import Streaming.Prelude
 
 
   
-
+responseBracket :: MonadUnliftIO m =>
+                   L.Request
+                -> L.Manager
+                -> (L.Response L.BodyReader -> m a) -> m a
 responseBracket request mgr =
   bracketR
     (L.responseOpen request mgr)
