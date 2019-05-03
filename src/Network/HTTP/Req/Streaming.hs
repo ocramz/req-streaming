@@ -1,3 +1,4 @@
+{-# language DeriveFunctor, GeneralizedNewtypeDeriving #-}
 module Network.HTTP.Req.Streaming where
 
 {-
@@ -26,37 +27,67 @@ main = runConduitRes $ do
 -}
 
 import Control.Monad (unless)
--- import Control.Exception (throwIO)
+import Control.Exception (throwIO)
 import Control.Monad.IO.Class (MonadIO (..))
-import Control.Monad.Trans.Class (lift)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+-- import Control.Monad.Trans.Class (lift)
 -- unliftio-core
 import Control.Monad.IO.Unlift (MonadUnliftIO(..))
 -- resourcet
-import Control.Monad.Trans.Resource (runResourceT, allocate, release)
+import Control.Monad.Trans.Resource -- (runResourceT, allocate, release)
 -- req
--- import Network.HTTP.Req (req')
+import Network.HTTP.Req -- (req')
 -- http-client
 import qualified Network.HTTP.Client as L
 -- bytestring
 import qualified Data.ByteString     as B
+import           Data.ByteString.Builder (byteString, Builder)
 -- streaming
-import Streaming.Prelude 
+import Streaming.Prelude (effects, for, yield)
+import Streaming
+-- streaming-utils
+import Streaming.Zip
+-- streaming-bytestring
+import qualified Data.ByteString.Streaming as SB
 
 
+
+
+-- streamingResponseR stream status headers =
+--     responseStream status headers streamingBody
+--     where
+--     streamingBody writeBuilder flush =
+--         let writer a =
+--                 do liftIO (writeBuilder (byteString a))
+--                     -- flushes for every produced bytestring, perhaps not optimal
+--                    liftIO flush
+--          in runResourceT $ void $ effects $ for stream writer
+
+
+
+
+
+newtype BStreamT m a =
+  BStreamT { unBStream :: Stream (Of B.ByteString) (ResourceT m) a }
+  deriving (Functor, Applicative, Monad, MonadIO)
+
+instance MonadIO m => MonadResource (BStreamT m) where
+  -- liftResourceT = lift
+
+instance MonadIO m => MonadHttp (BStreamT m) where
+  handleHttpException = liftIO . throwIO
 
   
-responseBracket :: MonadUnliftIO m =>
-                   L.Request
-                -> L.Manager
-                -> (L.Response L.BodyReader -> m a) -> m a
-responseBracket request mgr =
+  
+-- responseBracket :: MonadIO m => L.Request -> L.Manager -> BStreamT m ()
+responseBracket request mgr = 
   bracketR
     (L.responseOpen request mgr)
     L.responseClose
-    -- (lift . responseBodySource)
+    (BStreamT . responseBodySource)
       
 
-
+-- | Present a HTTP(S) response body as a 'Stream' of 'B.ByteString's
 responseBodySource :: MonadIO m
   => L.Response L.BodyReader -- ^ Response with body reader
   -> Stream (Of B.ByteString) m () -- ^ Response body as a 'Stream'
@@ -71,9 +102,42 @@ bodyReaderSource br = go
         yield bs
         go
 
-bracketR :: MonadUnliftIO m => IO t -> (t -> IO ()) -> (t -> m a) -> m a
-bracketR alloc free inside = runResourceT $ do
+bracketR :: MonadResource m =>
+            IO a         -- ^ allocate
+         -> (a -> IO ()) -- ^ free
+         -> (a -> m b)   -- ^ inside
+         -> m b
+bracketR alloc free inside = do
   (key, x) <- allocate alloc free
-  y <- lift $ inside x
+  y <- inside x
   release key
   pure y
+
+-- bracketRes alloc free inside = do 
+--   (key, x) <- allocate alloc free
+--   y <- inside x
+--   release key
+--   -- free x
+--   pure y
+
+
+----------------------------------------------------------------------------
+-- Helpers
+
+-- | This is taken from "Network.HTTP.Client.Conduit" without modifications.
+
+-- -- srcToPopperIO :: Source IO ByteString -> L.GivesPopper ()
+-- srcToPopperIO src f = do
+--   (rsrc0, ()) <- src $$+ return ()
+--   irsrc <- newIORef rsrc0
+--   let popper :: IO B.ByteString
+--       popper = do
+--         rsrc <- readIORef irsrc
+--         (rsrc', mres) <- rsrc $$++ await
+--         writeIORef irsrc rsrc'
+--         case mres of
+--           Nothing -> return B.empty
+--           Just bs
+--               | B.null bs -> popper
+--               | otherwise -> return bs
+--   f popper
